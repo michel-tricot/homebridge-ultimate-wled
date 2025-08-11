@@ -3,29 +3,28 @@ import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge
 import type { UltimateWled } from './wledPlatform.js';
 import { PLATFORM_NAME, PLUGIN_AUTHOR } from './settings.js';
 import { WLEDClient } from 'wled-client';
-import {_HSVtoRGB, hsvToRgb, rgbToHsv } from './utils.js';
+import convert, { HSV } from 'color-convert';
 
 class LightState {
   on = false;
-  private hkBrightness = 100;     // 0-100
-  hue = 0;                        // 0-360
-  saturation = 0;                 // 0-100
-  colors = [0, 0, 0];
+  hsv = [255, 0, 0];
+  colors = [255, 0, 0];
+  private brightness = 100;
 
-  setWledBrightness(wledBrightness: number) {
-    this.hkBrightness = LightState.toHkBrightness(wledBrightness);
+  set wledBrightness(wledBrightness: number) {
+    this.brightness = LightState.toHkBrightness(wledBrightness);
   }
 
-  getWledBrightness() {
-    return LightState.toWledBrightness(this.hkBrightness);
+  get wledBrightness() {
+    return LightState.toWledBrightness(this.brightness);
   }
 
-  setHkBrightness(hkBrightness: number) {
-    this.hkBrightness = hkBrightness;
+  set hkBrightness(hkBrightness: number) {
+    this.brightness = hkBrightness;
   }
 
-  getHkBrightness() {
-    return this.hkBrightness;
+  get hkBrightness() {
+    return this.brightness;
   }
 
   static toHkBrightness(wledBrightness: number) {
@@ -38,6 +37,26 @@ class LightState {
 
 }
 
+function monitorMethod(target: object, propertyKey: string, descriptor: PropertyDescriptor) {
+  const originalMethod = descriptor.value;
+  descriptor.value = function (...args: never[]) {
+    const o = this as WledAccessory;
+
+    const relevantArgs = args.slice(0, -2);
+
+    const logMethod = (d: unknown) => {
+      o.platform.log.debug(`${String(propertyKey)}(${relevantArgs.length > 0 ? relevantArgs : ''}) -> ${d !== undefined ? d : 'void'}`);
+      return d;
+    };
+
+    const result = originalMethod.apply(this, args);
+
+    return result instanceof Promise
+      ? result.then(logMethod)
+      : logMethod(result);
+  };
+}
+
 export class WledAccessory {
   private lightService: Service;
 
@@ -46,8 +65,8 @@ export class WledAccessory {
   private wledClient: WLEDClient;
 
   constructor(
-    private readonly platform: UltimateWled,
-    private readonly accessory: PlatformAccessory,
+    public readonly platform: UltimateWled,
+    public readonly accessory: PlatformAccessory,
   ) {
     // Configure Accessory
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
@@ -118,28 +137,24 @@ export class WledAccessory {
    * @example
    * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
    */
+  @monitorMethod
   async getOn(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get On ->', this.lightStates.on);
-
     return this.lightStates.on;
   }
 
+  @monitorMethod
   async getBrightness(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get Brightness ->', this.lightStates.getHkBrightness());
-
-    return this.lightStates.getHkBrightness();
+    return this.lightStates.hkBrightness;
   }
 
+  @monitorMethod
   async getHue(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get Hue ->', this.lightStates.hue);
-
-    return this.lightStates.hue;
+    return this.lightStates.hsv[0];
   }
 
+  @monitorMethod
   async getSaturation(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get Saturation ->', this.lightStates.saturation);
-
-    return this.lightStates.saturation;
+    return this.lightStates.hsv[1];
   }
 
 
@@ -147,95 +162,79 @@ export class WledAccessory {
    * Handle "SET" requests from HomeKit
    * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
    */
+  @monitorMethod
   async setOn(value: CharacteristicValue) {
-    this.platform.log.debug('Set On ->', value);
+    this.lightStates.on = value as boolean;
 
-    if (value as boolean) {
+    if (this.lightStates.on) {
       await this.wledClient.turnOn();
     } else {
       await this.wledClient.turnOff();
     }
   }
 
+  @monitorMethod
   async setBrightness(value: CharacteristicValue) {
-    this.platform.log.debug('Set Brightness -> ', value);
+    this.lightStates.hkBrightness = value as number;
 
-    try {
-      await this.wledClient.setBrightness(LightState.toWledBrightness(value as number));
-    } catch (error) {
-      this.platform.log.error('Error setting Brightness', error);
-    }
+    await this.wledClient.setBrightness(this.lightStates.wledBrightness);
   }
 
+  @monitorMethod
   async setHue(value: CharacteristicValue) {
-    this.platform.log.debug('Set Hue -> ', value);
+    this.lightStates.hsv[0] = value as number;
 
-    const { r, g, b } = _HSVtoRGB(
-      value as number,
-      this.lightStates.saturation,
-      this.lightStates.getHkBrightness(),
-    );
+    const hsv: HSV = [
+      this.lightStates.hsv[0],
+      this.lightStates.hsv[1],
+      this.lightStates.hkBrightness,
+    ];
 
-    this.platform.log.debug(`Set Hue Color -> RGB(${r}, ${g}, ${b})`);
+    const rgb = convert.hsv.rgb(hsv);
 
-    try {
-      await this.wledClient.setColor([r, g, b]);
-    } catch (error) {
-      this.platform.log.error('Error setting Hue', error);
-    }
+    await this.wledClient.setColor(rgb);
   }
 
+  @monitorMethod
   async setSaturation(value: CharacteristicValue) {
-    this.platform.log.debug('Set Saturation -> ', value);
+    this.lightStates.hsv[1] = value as number;
 
-    const { r, g, b } = _HSVtoRGB(
-      this.lightStates.hue,
-      value as number,
-      this.lightStates.getHkBrightness(),
-    );
+    const hsv: HSV = [
+      this.lightStates.hsv[0],
+      this.lightStates.hsv[1],
+      this.lightStates.hkBrightness,
+    ];
 
-    this.platform.log.debug(`Set Saturation Color -> RGB(${r}, ${g}, ${b})`);
+    const rgb = convert.hsv.rgb(hsv);
 
-    try {
-      await this.wledClient.setColor([r, g, b]);
-    } catch (error) {
-      this.platform.log.error('Error setting Saturation', error);
-    }
+    await this.wledClient.setColor(rgb);
   }
 
   private onStateReceived() {
     const state = this.wledClient.state;
 
-    // this.platform.log.debug('State received -> ', this.wledClient.state);
-    this.platform.log.debug('------ State received');
-
     if (state.on != null && this.lightStates.on !== state.on) {
       this.lightStates.on = state.on;
       this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.lightStates.on);
-      this.platform.log.debug('Updated On Characteristic -> ', this.lightStates.on);
+    }
+
+    if (state.brightness != null && this.lightStates.wledBrightness !== state.brightness) {
+      this.lightStates.wledBrightness = state.brightness;
+      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.hkBrightness);
     }
 
     const colors = state.segments.at(0)?.colors?.at(0);
-    if (colors != null && JSON.stringify(colors) !== JSON.stringify(this.lightStates.colors)) {
-      const { h, s, v } = rgbToHsv(colors[0], colors[1], colors[2]);
-      this.lightStates.colors = colors;
-      this.lightStates.hue = h;
-      this.lightStates.saturation = s;
-      this.lightStates.setHkBrightness(v);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.lightStates.hue);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.lightStates.saturation);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.getHkBrightness());
-      this.platform.log.debug('Updated Color Characteristic -> ', {
-        h: this.lightStates.hue,
-        s: this.lightStates.saturation,
-        v: this.lightStates.getHkBrightness(),
-      });
-    }
+    if (colors != null) {
+      const hsv = convert.rgb.hsv(colors[0], colors[1], colors[2]);
 
-    if (state.brightness != null && this.lightStates.getWledBrightness() !== state.brightness) {
-      this.lightStates.setWledBrightness(state.brightness);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.getHkBrightness());
-      this.platform.log.debug('Updated Brightness Characteristic -> ', this.lightStates.getHkBrightness());
+      if (JSON.stringify(this.lightStates.hsv) !== JSON.stringify(hsv)) {
+        this.lightStates.colors = colors;
+        this.lightStates.hsv = hsv;
+
+        this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.lightStates.hsv[0]);
+        this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.lightStates.hsv[1]);
+      }
+
     }
   }
 }
