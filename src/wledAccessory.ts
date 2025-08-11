@@ -1,20 +1,47 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
 import type { UltimateWled } from './wledPlatform.js';
-import { PLATFORM_NAME, PLUGIN_AUTHOR} from './settings.js';
+import { PLATFORM_NAME, PLUGIN_AUTHOR } from './settings.js';
 import { WLEDClient } from 'wled-client';
-import { hsvToRgb, rgbToHsv } from './utils.js';
+import {_HSVtoRGB, hsvToRgb, rgbToHsv } from './utils.js';
+
+class LightState {
+  on = false;
+  private hkBrightness = 100;     // 0-100
+  hue = 0;                        // 0-360
+  saturation = 0;                 // 0-100
+  colors = [0, 0, 0];
+
+  setWledBrightness(wledBrightness: number) {
+    this.hkBrightness = LightState.toHkBrightness(wledBrightness);
+  }
+
+  getWledBrightness() {
+    return LightState.toWledBrightness(this.hkBrightness);
+  }
+
+  setHkBrightness(hkBrightness: number) {
+    this.hkBrightness = hkBrightness;
+  }
+
+  getHkBrightness() {
+    return this.hkBrightness;
+  }
+
+  static toHkBrightness(wledBrightness: number) {
+    return Math.round(wledBrightness * 100 / 255);
+  }
+
+  static toWledBrightness(hkBrightness: number) {
+    return Math.round(hkBrightness * 255 / 100);
+  }
+
+}
 
 export class WledAccessory {
   private lightService: Service;
 
-  private lightStates = {
-    On: false,
-    Brightness: 100, // 0-100
-    Hue: 0,          // 0-360
-    Saturation: 0,   // 0-100
-    Colors: [255, 0, 0],
-  };
+  private lightStates: LightState = new LightState();
 
   private wledClient: WLEDClient;
 
@@ -45,7 +72,13 @@ export class WledAccessory {
       .onSet(this.setSaturation.bind(this))
       .onGet(this.getSaturation.bind(this));
 
-    this.wledClient = new WLEDClient('192.168.2.253');
+    this.wledClient = new WLEDClient({
+      host: '192.168.2.253',
+      websocket: {
+        reconnect: true,
+      },
+
+    });
   }
 
   async init() {
@@ -54,11 +87,19 @@ export class WledAccessory {
       this.onStateReceived();
     });
 
+    this.wledClient.on('open', () => {
+      this.platform.log.debug('✅ - Connection has been opened');
+    });
+
+    this.wledClient.on('close', () => {
+      this.platform.log.debug('❌ - Connection has been closed');
+    });
+
     await this.wledClient.init().catch(error => this.platform.log.error(error));
 
     this.lightService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA');
 
-    this.platform.log.debug('Wled', this.wledClient.info);
+    // this.platform.log.debug('Wled', this.wledClient.info);
   }
 
   /**
@@ -78,27 +119,27 @@ export class WledAccessory {
    * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
    */
   async getOn(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get On ->', this.lightStates.On);
+    this.platform.log.debug('Get On ->', this.lightStates.on);
 
-    return this.lightStates.On;
+    return this.lightStates.on;
   }
 
   async getBrightness(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get Brightness ->', this.lightStates.Brightness);
+    this.platform.log.debug('Get Brightness ->', this.lightStates.getHkBrightness());
 
-    return this.lightStates.Brightness;
+    return this.lightStates.getHkBrightness();
   }
 
   async getHue(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get Hue ->', this.lightStates.Hue);
+    this.platform.log.debug('Get Hue ->', this.lightStates.hue);
 
-    return this.lightStates.Hue;
+    return this.lightStates.hue;
   }
 
   async getSaturation(): Promise<CharacteristicValue> {
-    this.platform.log.debug('Get Saturation ->', this.lightStates.Saturation);
+    this.platform.log.debug('Get Saturation ->', this.lightStates.saturation);
 
-    return this.lightStates.Saturation;
+    return this.lightStates.saturation;
   }
 
 
@@ -119,73 +160,82 @@ export class WledAccessory {
   async setBrightness(value: CharacteristicValue) {
     this.platform.log.debug('Set Brightness -> ', value);
 
-    await this.wledClient.setBrightness(value as number * 255 / 100);
+    try {
+      await this.wledClient.setBrightness(LightState.toWledBrightness(value as number));
+    } catch (error) {
+      this.platform.log.error('Error setting Brightness', error);
+    }
   }
 
   async setHue(value: CharacteristicValue) {
     this.platform.log.debug('Set Hue -> ', value);
 
-    const { r, g, b } = hsvToRgb(
-      value as number / 360,
-      this.lightStates.Saturation / 100,
-      this.lightStates.Brightness / 100,
+    const { r, g, b } = _HSVtoRGB(
+      value as number,
+      this.lightStates.saturation,
+      this.lightStates.getHkBrightness(),
     );
 
-    await this.wledClient.setColor([r, g, b]);
+    this.platform.log.debug(`Set Hue Color -> RGB(${r}, ${g}, ${b})`);
+
+    try {
+      await this.wledClient.setColor([r, g, b]);
+    } catch (error) {
+      this.platform.log.error('Error setting Hue', error);
+    }
   }
 
   async setSaturation(value: CharacteristicValue) {
     this.platform.log.debug('Set Saturation -> ', value);
 
-    const { r, g, b } = hsvToRgb(
-      this.lightStates.Hue / 360,
-      value as number / 100,
-      this.lightStates.Brightness / 100,
+    const { r, g, b } = _HSVtoRGB(
+      this.lightStates.hue,
+      value as number,
+      this.lightStates.getHkBrightness(),
     );
 
-    await this.wledClient.setColor([r, g, b]);
+    this.platform.log.debug(`Set Saturation Color -> RGB(${r}, ${g}, ${b})`);
+
+    try {
+      await this.wledClient.setColor([r, g, b]);
+    } catch (error) {
+      this.platform.log.error('Error setting Saturation', error);
+    }
   }
 
-//
-//   this.lightService
-// .getCharacteristic(this.hap.Characteristic.Brightness)
-// .on(CharacteristicEventTypes.GET, (callback: CharacteristicGetCallback) => {
-//   // this.log.info('Brightness: '+this.brightness);
-//   this.brightness = Math.round(this.brightness/255*100);
-//   callback(undefined, this.brightness);
-// })
-// .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-//
-//   this.brightness = Math.round(255 / 100 * (value as number));
-//   this.httpSetBrightness();
-//
-//   if (this.prodLogging)
-//     this.log.info("Set brightness to " + value + "% " + this.brightness);
-//   callback();
-// });
   private onStateReceived() {
     const state = this.wledClient.state;
 
     // this.platform.log.debug('State received -> ', this.wledClient.state);
+    this.platform.log.debug('------ State received');
 
-    if (state.on != null && this.lightStates.On !== state.on) {
-      this.lightStates.On = state.on;
-      this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.lightStates.On);
-    }
-
-    if (state.brightness != null && this.lightStates.Brightness !== state.brightness) {
-      this.lightStates.Brightness = Math.round(state.brightness * 100 / 255);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.Brightness);
+    if (state.on != null && this.lightStates.on !== state.on) {
+      this.lightStates.on = state.on;
+      this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.lightStates.on);
+      this.platform.log.debug('Updated On Characteristic -> ', this.lightStates.on);
     }
 
     const colors = state.segments.at(0)?.colors?.at(0);
-    if (colors != null && JSON.stringify(colors) !== JSON.stringify(this.lightStates.Colors)) {
-      this.lightStates.Colors = colors;
-      const { h, s } = rgbToHsv(colors[0], colors[1], colors[2]);
-      this.lightStates.Hue = Math.round(h * 360);
-      this.lightStates.Saturation = Math.round(s * 100);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.lightStates.Hue);
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.lightStates.Saturation);
+    if (colors != null && JSON.stringify(colors) !== JSON.stringify(this.lightStates.colors)) {
+      const { h, s, v } = rgbToHsv(colors[0], colors[1], colors[2]);
+      this.lightStates.colors = colors;
+      this.lightStates.hue = h;
+      this.lightStates.saturation = s;
+      this.lightStates.setHkBrightness(v);
+      this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.lightStates.hue);
+      this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.lightStates.saturation);
+      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.getHkBrightness());
+      this.platform.log.debug('Updated Color Characteristic -> ', {
+        h: this.lightStates.hue,
+        s: this.lightStates.saturation,
+        v: this.lightStates.getHkBrightness(),
+      });
+    }
+
+    if (state.brightness != null && this.lightStates.getWledBrightness() !== state.brightness) {
+      this.lightStates.setWledBrightness(state.brightness);
+      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.getHkBrightness());
+      this.platform.log.debug('Updated Brightness Characteristic -> ', this.lightStates.getHkBrightness());
     }
   }
 }
