@@ -1,19 +1,19 @@
 {
-  "name": "homebridge-plugin-name",
-  "displayName": "Plugin Name",
+  "name": "homebridge-ultimate-wled",
+  "displayName": "Ultimate Wled",
   "type": "module",
   "version": "1.0.0",
   "private": true,
-  "description": "A short description about what your plugin does.",
-  "author": "Your Name",
+  "description": "An accessory plugin for homebridge to support Wled Strips",
+  "author": "Michel Tricot",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/USERNAME/GITHUB_PROJECT_NAME#readme",
+  "homepage": "https://github.com/michel-tricot/homebridge-ultimate-wled#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME.git"
+    "url": "https://github.com/michel-tricot/homebridge-ultimate-wled.git"
   },
   "bugs": {
-    "url": "https://github.com/USERNAME/GITHUB_PROJECT_NAME/issues"
+    "url": "https://github.com/michel-tricot/homebridge-ultimate-wled/issues"
   },
   "keywords": [
     "homebridge-plugin"
@@ -30,6 +30,7 @@
     "watch": "npm run build && npm link && nodemon"
   },
   "dependencies": {
+    "axios": "^1.11.0",
     "homebridge-lib": "^7.1.4"
   },
   "devDependencies": {

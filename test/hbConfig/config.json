@@ -1,6 +1,6 @@
 {
   "bridge": {
-    "name": "PluginTemplate",
+    "name": "Test Ultimate WLed",
     "username": "AA:BB:CC:DD:EE:FF",
     "port": 51826,
     "pin": "031-45-154"
@@ -8,7 +8,8 @@
   "description": "HomeBridge HTTP Status Control",
   "plugins": [
     "homebridge-plugin-name",
-    "homebridge-config-ui-x"
+    "homebridge-config-ui-x",
+    "homebridge-ultimate-wled"
   ],
   "platforms": [
     {
@@ -23,8 +24,16 @@
       "debug": false
     },
     {
-      "name": "homebridge-plugin-name",
-      "platform": "ExampleHomebridgePlugin"
+      "name": "homebridge-ultimate-wled",
+      "platform": "Ultimate Wled",
+      "wleds": [
+        {
+          "name": "Test Strip",
+          "host": "http://wled-test.local",
+          "presets": []
+        }
+      ],
+      "log": true
     }
   ],
   "accessories": []

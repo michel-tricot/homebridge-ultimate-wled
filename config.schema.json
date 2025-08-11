@@ -1,16 +1,50 @@
 {
-  "pluginAlias": "ExampleHomebridgePlugin",
+  "pluginAlias": "Ultimate Wled",
   "pluginType": "platform",
   "singular": true,
   "strictValidation": false,
   "schema": {
     "type": "object",
     "properties": {
-      "name": {
-        "title": "Name",
-        "type": "string",
-        "required": true,
-        "default": "Example Dynamic Platform"
+      "wleds": {
+        "type": "array",
+        "title": "wleds",
+        "items": {
+          "type": "object",
+          "title": "WLED instance",
+          "required": [
+            "name",
+            "host"
+          ],
+          "properties": {
+            "name": {
+              "title": "WLED name",
+              "description": "Name for this WLED instance.",
+              "type": "string",
+              "placeholder": "Enter WLED name"
+            },
+            "host": {
+              "title": "WLED IP Address hor hostname",
+              "description": "IP address or hostname for this WLED instance.",
+              "type": "string",
+              "placeholder": "Enter WLED IP address or hostname"
+            },
+            "effects": {
+              "title": "Effects",
+              "description": "Effects for this WLED instance",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "title": "Effect"
+              }
+            }
+          }
+        }
+      },
+      "log": {
+        "title": "Logging",
+        "description": "Enable Logging/Debugging option",
+        "type": "boolean"
       }
     }
   }
