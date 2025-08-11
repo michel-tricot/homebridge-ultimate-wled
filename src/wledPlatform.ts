@@ -8,7 +8,7 @@ import type {
   Service,
 } from 'homebridge';
 
-import { WledAccessory } from './wledAccessory';
+import { WledAccessory } from './wledAccessory.js';
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 
 /**
@@ -66,7 +66,7 @@ export class UltimateWled implements DynamicPlatformPlugin {
    * Accessories must only be registered once, previously created accessories
    * must not be registered again to prevent "duplicate UUID" errors.
    */
-  discoverDevices() {
+  async discoverDevices() {
     for (const wled of this.config.wleds) {
       this.log.debug('Configured wled:', wled);
 
@@ -103,7 +103,8 @@ export class UltimateWled implements DynamicPlatformPlugin {
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
       }
 
-      new WledAccessory(this, accessory);
+      const wledAccessory = new WledAccessory(this, accessory);
+      await wledAccessory.init();
 
       // push into discoveredCacheUUIDs
       this.discoveredCacheUUIDs.push(uuid);

@@ -1,6 +1,6 @@
 import type { API } from 'homebridge';
 
-import { UltimateWled } from './platform.js';
+import { UltimateWled } from './wledPlatform.js';
 import { PLATFORM_NAME } from './settings.js';
 
 /**
