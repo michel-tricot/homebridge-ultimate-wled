@@ -5,18 +5,19 @@ import { PLATFORM_NAME, PLUGIN_AUTHOR } from './settings.js';
 import { WLEDClient } from 'wled-client';
 import convert, { HSV } from 'color-convert';
 
-class LightState {
+class WledState {
   on = false;
   hsv = [255, 0, 0];
   colors = [255, 0, 0];
   private brightness = 100;
+  currentPreset = -1;
 
   set wledBrightness(wledBrightness: number) {
-    this.brightness = LightState.toHkBrightness(wledBrightness);
+    this.brightness = WledState.toHkBrightness(wledBrightness);
   }
 
   get wledBrightness() {
-    return LightState.toWledBrightness(this.brightness);
+    return WledState.toWledBrightness(this.brightness);
   }
 
   set hkBrightness(hkBrightness: number) {
@@ -59,9 +60,10 @@ function monitorMethod(target: object, propertyKey: string, descriptor: Property
 
 export class WledAccessory {
   private lightService: Service;
+  private presetsService: Service;
+  private inputServices = new Map<string, Service>();
 
-  private lightStates: LightState = new LightState();
-
+  private wledStates: WledState = new WledState();
   private wledClient: WLEDClient;
 
   constructor(
@@ -91,6 +93,17 @@ export class WledAccessory {
       .onSet(this.setSaturation.bind(this))
       .onGet(this.getSaturation.bind(this));
 
+    // Configure Presets
+    this.presetsService = this.accessory.getService(this.platform.Service.Television) ||
+      this.accessory.addService(this.platform.Service.Television);
+    this.presetsService.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Presets');
+    this.presetsService.getCharacteristic(this.platform.Characteristic.Active)
+      .onGet(this.getPresetActive.bind(this))
+      .onSet(this.setPresetActive.bind(this));
+    this.presetsService.getCharacteristic(this.platform.Characteristic.ActiveIdentifier)
+      .onGet(this.getCurrentPreset.bind(this))
+      .onSet(this.setCurrentPreset.bind(this));
+
     this.wledClient = new WLEDClient({
       host: '192.168.2.253',
       websocket: {
@@ -106,6 +119,10 @@ export class WledAccessory {
       this.onStateReceived();
     });
 
+    this.wledClient.on('update:presets', () => {
+      this.onPresetsReceived();
+    });
+
     this.wledClient.on('open', () => {
       this.platform.log.debug('✅ - Connection has been opened');
     });
@@ -117,8 +134,6 @@ export class WledAccessory {
     await this.wledClient.init().catch(error => this.platform.log.error(error));
 
     this.lightService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA');
-
-    // this.platform.log.debug('Wled', this.wledClient.info);
   }
 
   /**
@@ -139,22 +154,32 @@ export class WledAccessory {
    */
   @monitorMethod
   async getOn(): Promise<CharacteristicValue> {
-    return this.lightStates.on;
+    return this.wledStates.on;
   }
 
   @monitorMethod
   async getBrightness(): Promise<CharacteristicValue> {
-    return this.lightStates.hkBrightness;
+    return this.wledStates.hkBrightness;
   }
 
   @monitorMethod
   async getHue(): Promise<CharacteristicValue> {
-    return this.lightStates.hsv[0];
+    return this.wledStates.hsv[0];
   }
 
   @monitorMethod
   async getSaturation(): Promise<CharacteristicValue> {
-    return this.lightStates.hsv[1];
+    return this.wledStates.hsv[1];
+  }
+
+  @monitorMethod
+  async getPresetActive(): Promise<CharacteristicValue> {
+    return this.wledStates.currentPreset >= 0;
+  }
+
+  @monitorMethod
+  async getCurrentPreset(): Promise<CharacteristicValue> {
+    return Math.max(0, this.wledStates.currentPreset);
   }
 
 
@@ -164,9 +189,9 @@ export class WledAccessory {
    */
   @monitorMethod
   async setOn(value: CharacteristicValue) {
-    this.lightStates.on = value as boolean;
+    this.wledStates.on = value as boolean;
 
-    if (this.lightStates.on) {
+    if (this.wledStates.on) {
       await this.wledClient.turnOn();
     } else {
       await this.wledClient.turnOff();
@@ -175,19 +200,19 @@ export class WledAccessory {
 
   @monitorMethod
   async setBrightness(value: CharacteristicValue) {
-    this.lightStates.hkBrightness = value as number;
+    this.wledStates.hkBrightness = value as number;
 
-    await this.wledClient.setBrightness(this.lightStates.wledBrightness);
+    await this.wledClient.setBrightness(this.wledStates.wledBrightness);
   }
 
   @monitorMethod
   async setHue(value: CharacteristicValue) {
-    this.lightStates.hsv[0] = value as number;
+    this.wledStates.hsv[0] = value as number;
 
     const hsv: HSV = [
-      this.lightStates.hsv[0],
-      this.lightStates.hsv[1],
-      this.lightStates.hkBrightness,
+      this.wledStates.hsv[0],
+      this.wledStates.hsv[1],
+      this.wledStates.hkBrightness,
     ];
 
     const rgb = convert.hsv.rgb(hsv);
@@ -197,12 +222,12 @@ export class WledAccessory {
 
   @monitorMethod
   async setSaturation(value: CharacteristicValue) {
-    this.lightStates.hsv[1] = value as number;
+    this.wledStates.hsv[1] = value as number;
 
     const hsv: HSV = [
-      this.lightStates.hsv[0],
-      this.lightStates.hsv[1],
-      this.lightStates.hkBrightness,
+      this.wledStates.hsv[0],
+      this.wledStates.hsv[1],
+      this.wledStates.hkBrightness,
     ];
 
     const rgb = convert.hsv.rgb(hsv);
@@ -210,31 +235,93 @@ export class WledAccessory {
     await this.wledClient.setColor(rgb);
   }
 
+  @monitorMethod
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async setPresetActive(value: CharacteristicValue) {
+    this.wledStates.currentPreset = -1;
+  }
+
+  @monitorMethod
+  async setCurrentPreset(value: CharacteristicValue) {
+    this.wledStates.currentPreset = value as number;
+  }
+
+
   private onStateReceived() {
     const state = this.wledClient.state;
 
-    if (state.on != null && this.lightStates.on !== state.on) {
-      this.lightStates.on = state.on;
-      this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.lightStates.on);
+    this.platform.log.debug('State received', state);
+
+    if (state.on != null && this.wledStates.on !== state.on) {
+      this.wledStates.on = state.on;
+      this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on);
     }
 
-    if (state.brightness != null && this.lightStates.wledBrightness !== state.brightness) {
-      this.lightStates.wledBrightness = state.brightness;
-      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.lightStates.hkBrightness);
+    if (state.brightness != null && this.wledStates.wledBrightness !== state.brightness) {
+      this.wledStates.wledBrightness = state.brightness;
+      this.lightService.updateCharacteristic(this.platform.Characteristic.Brightness, this.wledStates.hkBrightness);
     }
 
     const colors = state.segments.at(0)?.colors?.at(0);
     if (colors != null) {
       const hsv = convert.rgb.hsv(colors[0], colors[1], colors[2]);
 
-      if (JSON.stringify(this.lightStates.hsv) !== JSON.stringify(hsv)) {
-        this.lightStates.colors = colors;
-        this.lightStates.hsv = hsv;
+      if (JSON.stringify(this.wledStates.hsv) !== JSON.stringify(hsv)) {
+        this.wledStates.colors = colors;
+        this.wledStates.hsv = hsv;
 
-        this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.lightStates.hsv[0]);
-        this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.lightStates.hsv[1]);
+        this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.wledStates.hsv[0]);
+        this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.wledStates.hsv[1]);
       }
 
+    }
+
+    if (state.presetId!= null && state.presetId !== this.wledStates.currentPreset) {
+      this.wledStates.currentPreset = state.presetId;
+      this.presetsService.updateCharacteristic(this.platform.Characteristic.Active, this.wledStates.currentPreset >= 0);
+      this.presetsService.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, Math.max(0, this.wledStates.currentPreset));
+    }
+  }
+
+  private onPresetsReceived() {
+    const presets = this.wledClient.presets;
+
+    this.platform.log.debug('Presets received', presets);
+
+    const originalServices = new Map<string, Service>();
+    const linkedServicesCopy = [...this.presetsService.linkedServices];
+    for (const linkService of linkedServicesCopy) {
+      if (linkService.subtype === undefined) {
+        this.presetsService.removeLinkedService(linkService);
+        this.platform.log.debug('Removing invalid service', linkService);
+        continue;
+      }
+      originalServices.set(linkService.subtype, linkService);
+    }
+
+    const validPresets = new Set();
+    for (const rawkey of Object.keys(presets)) {
+      const id = parseInt(rawkey);
+      const preset = presets[id];
+      const name = preset.name || 'Default';
+      const subtype = `Preset-${id}-${name}`;
+
+      const inputService = this.accessory.getService(subtype) ||
+        this.accessory.addService(this.platform.Service.InputSource, name, subtype);
+      inputService
+        .setCharacteristic(this.platform.Characteristic.Identifier, id)
+        .setCharacteristic(this.platform.Characteristic.ConfiguredName, name)
+        .setCharacteristic(this.platform.Characteristic.IsConfigured, this.platform.Characteristic.IsConfigured.CONFIGURED)
+        .setCharacteristic(this.platform.Characteristic.InputSourceType, this.platform.Characteristic.InputSourceType.HDMI);
+      this.presetsService.addLinkedService(inputService);
+      validPresets.add(subtype);
+    }
+
+    for (const [subtype, originalService] of originalServices) {
+      if (!validPresets.has(subtype)) {
+        this.platform.log.debug(`${subtype} not available anymore`);
+        this.presetsService.removeLinkedService(originalService);
+      }
     }
   }
 }
