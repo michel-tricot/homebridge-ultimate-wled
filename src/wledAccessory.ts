@@ -10,7 +10,8 @@ class WledState {
   hsv = [255, 0, 0];
   colors = [255, 0, 0];
   private brightness = 100;
-  currentPreset = -1;
+  presetsActive = false;
+  currentPreset = 0;
 
   set wledBrightness(wledBrightness: number) {
     this.brightness = WledState.toHkBrightness(wledBrightness);
@@ -98,8 +99,8 @@ export class WledAccessory {
       this.accessory.addService(this.platform.Service.Television);
     this.presetsService.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Presets');
     this.presetsService.getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(this.getPresetActive.bind(this))
-      .onSet(this.setPresetActive.bind(this));
+      .onGet(this.getPresetsActive.bind(this))
+      .onSet(this.setPresetsActive.bind(this));
     this.presetsService.getCharacteristic(this.platform.Characteristic.ActiveIdentifier)
       .onGet(this.getCurrentPreset.bind(this))
       .onSet(this.setCurrentPreset.bind(this));
@@ -173,8 +174,8 @@ export class WledAccessory {
   }
 
   @monitorMethod
-  async getPresetActive(): Promise<CharacteristicValue> {
-    return this.wledStates.currentPreset >= 0;
+  async getPresetsActive(): Promise<CharacteristicValue> {
+    return this.wledStates.presetsActive;
   }
 
   @monitorMethod
@@ -236,9 +237,10 @@ export class WledAccessory {
   }
 
   @monitorMethod
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async setPresetActive(value: CharacteristicValue) {
-    this.wledStates.currentPreset = -1;
+  async setPresetsActive(value: CharacteristicValue) {
+    this.wledStates.presetsActive = value as boolean;
+
+    await this.wledClient.refreshPresets();
   }
 
   @monitorMethod
@@ -276,12 +278,16 @@ export class WledAccessory {
 
     }
 
-    if (state.presetId!= null && state.presetId !== this.wledStates.currentPreset) {
-      this.wledStates.currentPreset = state.presetId;
-      this.presetsService.updateCharacteristic(this.platform.Characteristic.Active, this.wledStates.currentPreset >= 0);
-      this.presetsService.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, Math.max(0, this.wledStates.currentPreset));
+    if (state.presetId != null &&
+      (state.presetId >= 0 !== this.wledStates.presetsActive ||
+      (this.wledStates.presetsActive && state.presetId !== this.wledStates.currentPreset))) {
+      this.wledStates.currentPreset = state.presetId >= 0 ? state.presetId : this.wledStates.currentPreset;
+      this.wledStates.presetsActive = state.presetId >= 0;
+      this.presetsService.updateCharacteristic(this.platform.Characteristic.Active, this.wledStates.presetsActive);
+      this.presetsService.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, this.wledStates.currentPreset);
     }
   }
+
 
   private onPresetsReceived() {
     const presets = this.wledClient.presets;
