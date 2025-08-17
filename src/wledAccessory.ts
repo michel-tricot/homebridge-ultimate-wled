@@ -10,7 +10,6 @@ class WledState {
   hsv = [255, 0, 0];
   colors = [255, 0, 0];
   private brightness = 100;
-  presetsActive = false;
   currentPreset = 0;
 
   set wledBrightness(wledBrightness: number) {
@@ -62,7 +61,6 @@ function monitorMethod(target: object, propertyKey: string, descriptor: Property
 export class WledAccessory {
   private lightService: Service;
   private presetsService: Service;
-  private inputServices = new Map<string, Service>();
 
   private wledStates: WledState = new WledState();
   private wledClient: WLEDClient;
@@ -99,8 +97,8 @@ export class WledAccessory {
       this.accessory.addService(this.platform.Service.Television);
     this.presetsService.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Presets');
     this.presetsService.getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(this.getPresetsActive.bind(this))
-      .onSet(this.setPresetsActive.bind(this));
+      .onGet(this.getOn.bind(this))
+      .onSet(this.setOn.bind(this));
     this.presetsService.getCharacteristic(this.platform.Characteristic.ActiveIdentifier)
       .onGet(this.getCurrentPreset.bind(this))
       .onSet(this.setCurrentPreset.bind(this));
@@ -174,15 +172,9 @@ export class WledAccessory {
   }
 
   @monitorMethod
-  async getPresetsActive(): Promise<CharacteristicValue> {
-    return this.wledStates.presetsActive;
-  }
-
-  @monitorMethod
   async getCurrentPreset(): Promise<CharacteristicValue> {
     return Math.max(0, this.wledStates.currentPreset);
   }
-
 
   /**
    * Handle "SET" requests from HomeKit
@@ -194,6 +186,7 @@ export class WledAccessory {
 
     if (this.wledStates.on) {
       await this.wledClient.turnOn();
+      await this.wledClient.refreshPresets();
     } else {
       await this.wledClient.turnOff();
     }
@@ -237,15 +230,10 @@ export class WledAccessory {
   }
 
   @monitorMethod
-  async setPresetsActive(value: CharacteristicValue) {
-    this.wledStates.presetsActive = value as boolean;
-
-    await this.wledClient.refreshPresets();
-  }
-
-  @monitorMethod
   async setCurrentPreset(value: CharacteristicValue) {
     this.wledStates.currentPreset = value as number;
+
+    await this.wledClient.setPreset(this.wledStates.currentPreset);
   }
 
 
@@ -254,8 +242,9 @@ export class WledAccessory {
 
     this.platform.log.debug('State received', state);
 
-    if (state.on != null && this.wledStates.on !== state.on) {
+    if (state.on != null) {
       this.wledStates.on = state.on;
+      this.presetsService.updateCharacteristic(this.platform.Characteristic.Active, this.wledStates.on);
       this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on);
     }
 
@@ -278,12 +267,8 @@ export class WledAccessory {
 
     }
 
-    if (state.presetId != null &&
-      (state.presetId >= 0 !== this.wledStates.presetsActive ||
-      (this.wledStates.presetsActive && state.presetId !== this.wledStates.currentPreset))) {
+    if (state.presetId != null && state.presetId >= 0) {
       this.wledStates.currentPreset = state.presetId >= 0 ? state.presetId : this.wledStates.currentPreset;
-      this.wledStates.presetsActive = state.presetId >= 0;
-      this.presetsService.updateCharacteristic(this.platform.Characteristic.Active, this.wledStates.presetsActive);
       this.presetsService.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, this.wledStates.currentPreset);
     }
   }
