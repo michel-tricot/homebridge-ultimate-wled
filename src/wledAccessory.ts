@@ -10,7 +10,7 @@ class WledState {
   hsv = [255, 0, 0];
   colors = [255, 0, 0];
   private brightness = 100;
-  currentPreset = 0;
+  currentPreset: number | undefined = 0;
 
   set wledBrightness(wledBrightness: number) {
     this.brightness = WledState.toHkBrightness(wledBrightness);
@@ -35,7 +35,6 @@ class WledState {
   static toWledBrightness(hkBrightness: number) {
     return Math.round(hkBrightness * 255 / 100);
   }
-
 }
 
 function monitorMethod(target: object, propertyKey: string, descriptor: PropertyDescriptor) {
@@ -60,7 +59,7 @@ function monitorMethod(target: object, propertyKey: string, descriptor: Property
 
 export class WledAccessory {
   private lightService: Service;
-  private presetsService: Service;
+  private presetServices = new Map<number, Service>();
 
   private wledStates: WledState = new WledState();
   private wledClient: WLEDClient;
@@ -77,7 +76,7 @@ export class WledAccessory {
 
     // Configure Light
     this.lightService = this.accessory.getService(this.platform.Service.Lightbulb) ||
-      this.accessory.addService(this.platform.Service.Lightbulb);
+      this.accessory.addService(this.platform.Service.Lightbulb, 'Strip', 'Strip');
     this.lightService.setCharacteristic(this.platform.Characteristic.Name, 'Strip');
     this.lightService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(this.setOn.bind(this))
@@ -91,24 +90,13 @@ export class WledAccessory {
     this.lightService.getCharacteristic(this.platform.Characteristic.Saturation)
       .onSet(this.setSaturation.bind(this))
       .onGet(this.getSaturation.bind(this));
-
-    // Configure Presets
-    this.presetsService = this.accessory.getService(this.platform.Service.Television) ||
-      this.accessory.addService(this.platform.Service.Television);
-    this.presetsService.setCharacteristic(this.platform.Characteristic.ConfiguredName, 'Presets');
-    this.presetsService.getCharacteristic(this.platform.Characteristic.Active)
-      .onGet(this.getOn.bind(this))
-      .onSet(this.setOn.bind(this));
-    this.presetsService.getCharacteristic(this.platform.Characteristic.ActiveIdentifier)
-      .onGet(this.getCurrentPreset.bind(this))
-      .onSet(this.setCurrentPreset.bind(this));
+    this.lightService.setPrimaryService(true);
 
     this.wledClient = new WLEDClient({
       host: '192.168.2.253',
       websocket: {
         reconnect: true,
       },
-
     });
   }
 
@@ -135,22 +123,6 @@ export class WledAccessory {
     this.lightService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA');
   }
 
-  /**
-   * Handle the "GET" requests from HomeKit
-   * These are sent when HomeKit wants to know the current state of the accessory, for example, checking if a Light bulb is on.
-   *
-   * GET requests should return as fast as possible. A long delay here will result in
-   * HomeKit being unresponsive and a bad user experience in general.
-   *
-   * If your device takes time to respond you should update the status of your device
-   * asynchronously instead using the `updateCharacteristic` method instead.
-   * In this case, you may decide not to implement `onGet` handlers, which may speed up
-   * the responsiveness of your device in the Home app.
-   * if you need to return an error to show the device as "Not Responding" in the Home app:
-   * throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-   * @example
-   * this.service.updateCharacteristic(this.platform.Characteristic.On, true)
-   */
   @monitorMethod
   async getOn(): Promise<CharacteristicValue> {
     return this.wledStates.on;
@@ -172,21 +144,16 @@ export class WledAccessory {
   }
 
   @monitorMethod
-  async getCurrentPreset(): Promise<CharacteristicValue> {
-    return Math.max(0, this.wledStates.currentPreset);
+  async getPresetState(id: number): Promise<CharacteristicValue> {
+    return this.wledStates.currentPreset === id;
   }
 
-  /**
-   * Handle "SET" requests from HomeKit
-   * These are sent when the user changes the state of an accessory, for example, turning on a Light bulb.
-   */
   @monitorMethod
   async setOn(value: CharacteristicValue) {
     this.wledStates.on = value as boolean;
 
     if (this.wledStates.on) {
       await this.wledClient.turnOn();
-      await this.wledClient.refreshPresets();
     } else {
       await this.wledClient.turnOff();
     }
@@ -230,21 +197,22 @@ export class WledAccessory {
   }
 
   @monitorMethod
-  async setCurrentPreset(value: CharacteristicValue) {
-    this.wledStates.currentPreset = value as number;
-
-    await this.wledClient.setPreset(this.wledStates.currentPreset);
+  async setPresetState(id: number, value: CharacteristicValue) {
+    if (value as boolean) {
+      this.wledStates.currentPreset = id;
+      await this.wledClient.setPreset(this.wledStates.currentPreset);
+    }
   }
 
-
-  private onStateReceived() {
+  private async onStateReceived() {
     const state = this.wledClient.state;
 
     this.platform.log.debug('State received', state);
 
+    await this.wledClient.refreshPresets();
+
     if (state.on != null) {
       this.wledStates.on = state.on;
-      this.presetsService.updateCharacteristic(this.platform.Characteristic.Active, this.wledStates.on);
       this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on);
     }
 
@@ -264,55 +232,62 @@ export class WledAccessory {
         this.lightService.updateCharacteristic(this.platform.Characteristic.Hue, this.wledStates.hsv[0]);
         this.lightService.updateCharacteristic(this.platform.Characteristic.Saturation, this.wledStates.hsv[1]);
       }
-
     }
 
-    if (state.presetId != null && state.presetId >= 0) {
-      this.wledStates.currentPreset = state.presetId >= 0 ? state.presetId : this.wledStates.currentPreset;
-      this.presetsService.updateCharacteristic(this.platform.Characteristic.ActiveIdentifier, this.wledStates.currentPreset);
+    for (const [id, presetService] of this.presetServices) {
+      this.wledStates.currentPreset = state.presetId;
+      presetService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on && this.wledStates.currentPreset === id);
     }
   }
-
 
   private onPresetsReceived() {
     const presets = this.wledClient.presets;
 
     this.platform.log.debug('Presets received', presets);
 
-    const originalServices = new Map<string, Service>();
-    const linkedServicesCopy = [...this.presetsService.linkedServices];
-    for (const linkService of linkedServicesCopy) {
-      if (linkService.subtype === undefined) {
-        this.presetsService.removeLinkedService(linkService);
-        this.platform.log.debug('Removing invalid service', linkService);
-        continue;
-      }
-      originalServices.set(linkService.subtype, linkService);
-    }
-
-    const validPresets = new Set();
+    const currentServices = new Map<number, Service>();
+    const validSubtypes = new Set<string>();
     for (const rawkey of Object.keys(presets)) {
       const id = parseInt(rawkey);
+
+      if (id === 0) { // remove default empty
+        continue;
+      }
+
       const preset = presets[id];
       const name = preset.name || 'Default';
-      const subtype = `Preset-${id}-${name}`;
+      const subtype = `Preset-Switch-${id}-${name}`;
 
       const inputService = this.accessory.getService(subtype) ||
-        this.accessory.addService(this.platform.Service.InputSource, name, subtype);
-      inputService
-        .setCharacteristic(this.platform.Characteristic.Identifier, id)
-        .setCharacteristic(this.platform.Characteristic.ConfiguredName, name)
-        .setCharacteristic(this.platform.Characteristic.IsConfigured, this.platform.Characteristic.IsConfigured.CONFIGURED)
-        .setCharacteristic(this.platform.Characteristic.InputSourceType, this.platform.Characteristic.InputSourceType.HDMI);
-      this.presetsService.addLinkedService(inputService);
-      validPresets.add(subtype);
+        this.accessory.addService(this.platform.Service.Switch, name, subtype);
+      inputService.setCharacteristic(this.platform.Characteristic.Name, name);
+      inputService.getCharacteristic(this.platform.Characteristic.On)
+        .onGet(() => this.getPresetState(id))
+        .onSet((v) => this.setPresetState(id, v));
+
+      if (!inputService.testCharacteristic(this.platform.Characteristic.ConfiguredName)) {
+        inputService.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+      }
+      inputService.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
+
+      this.platform.log.debug(`Strip name ${this.lightService.getCharacteristic(this.platform.Characteristic.Name).value}`);
+
+      currentServices.set(id, inputService);
+      validSubtypes.add(subtype);
     }
 
-    for (const [subtype, originalService] of originalServices) {
-      if (!validPresets.has(subtype)) {
-        this.platform.log.debug(`${subtype} not available anymore`);
-        this.presetsService.removeLinkedService(originalService);
+    for (const service of this.lightService.linkedServices) {
+      if (service.subtype === undefined || !validSubtypes.has(service.subtype)) {
+        this.platform.log.debug(`Removing old preset ${service.subtype}`);
+        this.lightService.removeLinkedService(service);
+        this.accessory.removeService(service);
       }
+    }
+
+    this.presetServices.clear();
+    for (const [id, service] of currentServices) {
+      this.lightService.addLinkedService(service);
+      this.presetServices.set(id, service);
     }
   }
 }
