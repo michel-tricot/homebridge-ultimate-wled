@@ -1,9 +1,12 @@
 import type { CharacteristicValue, PlatformAccessory, Service } from 'homebridge';
 
+import util from 'util';
+
 import type { UltimateWled } from './wledPlatform.js';
 import { PLATFORM_NAME, PLUGIN_AUTHOR } from './settings.js';
 import { WLEDClient } from 'wled-client';
 import convert, { HSV } from 'color-convert';
+import { WLEDConfiguration } from './@types/config';
 
 class WledState {
   on = false;
@@ -42,10 +45,8 @@ function monitorMethod(target: object, propertyKey: string, descriptor: Property
   descriptor.value = function (...args: never[]) {
     const o = this as WledAccessory;
 
-    const relevantArgs = args.slice(0, -2);
-
     const logMethod = (d: unknown) => {
-      o.platform.log.debug(`${String(propertyKey)}(${relevantArgs.length > 0 ? relevantArgs : ''}) -> ${d !== undefined ? d : 'void'}`);
+      o.platform.log.debug(`${String(propertyKey)}(${util.inspect(args)}) -> ${d !== undefined ? d : 'void'}`);
       return d;
     };
 
@@ -79,23 +80,29 @@ export class WledAccessory {
       this.accessory.addService(this.platform.Service.Lightbulb, 'Strip', 'Strip');
     this.lightService.setCharacteristic(this.platform.Characteristic.Name, 'Strip');
     this.lightService.getCharacteristic(this.platform.Characteristic.On)
-      .onSet(this.setOn.bind(this))
-      .onGet(this.getOn.bind(this));
+      .onSet(v => this.setOn(v))
+      .onGet(() => this.getOn());
     this.lightService.getCharacteristic(this.platform.Characteristic.Brightness)
-      .onSet(this.setBrightness.bind(this))
-      .onGet(this.getBrightness.bind(this));
+      .onSet(v => this.setBrightness(v))
+      .onGet(() => this.getBrightness());
     this.lightService.getCharacteristic(this.platform.Characteristic.Hue)
-      .onSet(this.setHue.bind(this))
-      .onGet(this.getHue.bind(this));
+      .onSet(v => this.setHue(v))
+      .onGet(() => this.getHue());
     this.lightService.getCharacteristic(this.platform.Characteristic.Saturation)
-      .onSet(this.setSaturation.bind(this))
-      .onGet(this.getSaturation.bind(this));
+      .onSet(v => this.setSaturation(v))
+      .onGet(() => this.getSaturation());
     this.lightService.setPrimaryService(true);
 
+    const wledConfig = this.accessory.context.wled as WLEDConfiguration;
+
     this.wledClient = new WLEDClient({
-      host: '192.168.2.253',
+      host: wledConfig.ip,
       websocket: {
         reconnect: true,
+      },
+      immediate: true,
+      init: {
+        presets: true,
       },
     });
   }
@@ -150,9 +157,9 @@ export class WledAccessory {
 
   @monitorMethod
   async setOn(value: CharacteristicValue) {
-    this.wledStates.on = value as boolean;
+    const on = value as boolean;
 
-    if (this.wledStates.on) {
+    if (on) {
       await this.wledClient.turnOn();
     } else {
       await this.wledClient.turnOff();
@@ -207,13 +214,15 @@ export class WledAccessory {
   private async onStateReceived() {
     const state = this.wledClient.state;
 
-    this.platform.log.debug('State received', state);
+    this.platform.log.debug('State received');
 
-    await this.wledClient.refreshPresets();
-
-    if (state.on != null) {
+    if (state.on !== undefined && state.on !== this.wledStates.on) {
       this.wledStates.on = state.on;
       this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on);
+
+      if (this.wledStates.on) { // not receiving presets updates
+        await this.wledClient.refreshPresets();
+      }
     }
 
     if (state.brightness != null && this.wledStates.wledBrightness !== state.brightness) {
@@ -243,7 +252,7 @@ export class WledAccessory {
   private onPresetsReceived() {
     const presets = this.wledClient.presets;
 
-    this.platform.log.debug('Presets received', presets);
+    this.platform.log.debug('Presets received');
 
     const currentServices = new Map<number, Service>();
     const validSubtypes = new Set<string>();
@@ -269,8 +278,6 @@ export class WledAccessory {
         inputService.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
       }
       inputService.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
-
-      this.platform.log.debug(`Strip name ${this.lightService.getCharacteristic(this.platform.Characteristic.Name).value}`);
 
       currentServices.set(id, inputService);
       validSubtypes.add(subtype);

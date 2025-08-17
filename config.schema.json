@@ -4,6 +4,7 @@
   "singular": true,
   "strictValidation": false,
   "schema": {
+    "title": "WLED Plugin Configuration",
     "type": "object",
     "properties": {
       "wleds": {
@@ -11,10 +12,10 @@
         "title": "wleds",
         "items": {
           "type": "object",
-          "title": "WLED instance",
+          "title": "WLED Configuration",
           "required": [
             "name",
-            "host"
+            "ip"
           ],
           "properties": {
             "name": {
@@ -23,28 +24,14 @@
               "type": "string",
               "placeholder": "Enter WLED name"
             },
-            "host": {
-              "title": "WLED IP Address hor hostname",
-              "description": "IP address or hostname for this WLED instance.",
+            "ip": {
+              "title": "WLED IP address",
+              "description": "IP address for this WLED instance.",
               "type": "string",
-              "placeholder": "Enter WLED IP address or hostname"
-            },
-            "effects": {
-              "title": "Effects",
-              "description": "Effects for this WLED instance",
-              "type": "array",
-              "items": {
-                "type": "string",
-                "title": "Effect"
-              }
+              "placeholder": "Enter WLED IP address"
             }
           }
         }
-      },
-      "log": {
-        "title": "Logging",
-        "description": "Enable Logging/Debugging option",
-        "type": "boolean"
       }
     }
   }

@@ -7,4 +7,4 @@ export const PLATFORM_NAME = 'Ultimate Wled';
  * This must match the name of your plugin as defined the package.json `name` property
  */
 export const PLUGIN_NAME = 'homebridge-ultimate-wled';
-export const PLUGIN_AUTHOR = 'michel-tricot';
+export const PLUGIN_AUTHOR = 'mtricot';

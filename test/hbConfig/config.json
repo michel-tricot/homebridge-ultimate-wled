@@ -29,8 +29,7 @@
       "wleds": [
         {
           "name": "Test Strip",
-          "host": "192.168.2.253",
-          "presets": []
+          "ip": "192.168.2.253"
         }
       ],
       "log": true
