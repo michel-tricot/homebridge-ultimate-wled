@@ -62,7 +62,7 @@ export class WledAccessory {
   private lightService: Service;
   private presetServices = new Map<number, Service>();
 
-  private wledStates: WledState = new WledState();
+  wledStates: WledState = new WledState();
   private wledClient: WLEDClient;
 
   constructor(
