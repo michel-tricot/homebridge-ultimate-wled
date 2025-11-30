@@ -3,7 +3,8 @@
     "name": "Test Ultimate WLed",
     "username": "0E:A1:5C:D7:B2:F3",
     "port": 51826,
-    "pin": "031-45-154"
+    "pin": "031-45-154",
+    "advertiser": "bonjour-hap"
   },
   "description": "HomeBridge HTTP Status Control",
   "plugins": [
