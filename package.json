@@ -2,7 +2,7 @@
   "name": "homebridge-ultimate-wled",
   "displayName": "Ultimate Wled",
   "type": "module",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "An accessory plugin for homebridge to support Wled Strips",
   "author": "Michel Tricot",
   "license": "Apache-2.0",
