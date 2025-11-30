@@ -69,11 +69,25 @@ export class WledAccessory {
     public readonly platform: UltimateWled,
     public readonly accessory: PlatformAccessory,
   ) {
+    const wledConfig = this.accessory.context.wled as WLEDConfiguration;
+
+    this.wledClient = new WLEDClient({
+      host: wledConfig.ip,
+      websocket: {
+        reconnect: true,
+      },
+      immediate: true,
+      init: {
+        presets: true,
+      },
+    });
+
     // Configure Accessory
     this.accessory.getService(this.platform.Service.AccessoryInformation)!
       .setCharacteristic(this.platform.Characteristic.Manufacturer, PLATFORM_NAME)
       .setCharacteristic(this.platform.Characteristic.Model, PLUGIN_AUTHOR)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'NA');
+      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'NA')
+      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA');
 
     // Configure Light
     this.lightService = this.accessory.getService(this.platform.Service.Lightbulb) ||
@@ -92,19 +106,6 @@ export class WledAccessory {
       .onSet(v => this.setSaturation(v))
       .onGet(() => this.getSaturation());
     this.lightService.setPrimaryService(true);
-
-    const wledConfig = this.accessory.context.wled as WLEDConfiguration;
-
-    this.wledClient = new WLEDClient({
-      host: wledConfig.ip,
-      websocket: {
-        reconnect: true,
-      },
-      immediate: true,
-      init: {
-        presets: true,
-      },
-    });
   }
 
   async init() {
@@ -126,8 +127,6 @@ export class WledAccessory {
     });
 
     await this.wledClient.init().catch(error => this.platform.log.error(error));
-
-    this.lightService.updateCharacteristic(this.platform.Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA');
   }
 
   @monitorMethod
