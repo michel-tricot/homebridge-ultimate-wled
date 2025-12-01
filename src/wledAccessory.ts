@@ -94,30 +94,60 @@ export class WledAccessory {
       },
     });
 
-    // Configure Accessory
-    this.accessory.getService(this.platform.Service.AccessoryInformation)!
-      .setCharacteristic(this.platform.Characteristic.Manufacturer, PLATFORM_NAME)
-      .setCharacteristic(this.platform.Characteristic.Model, PLUGIN_AUTHOR)
-      .setCharacteristic(this.platform.Characteristic.SerialNumber, 'NA')
-      .setCharacteristic(this.platform.Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA');
+    this.configureAccessory(wledConfig.name);
+    this.lightService = this.configureLightService();
+  }
 
-    // Configure Light Control
-    this.lightService = this.accessory.getService(this.platform.Service.Lightbulb) ||
-      this.accessory.addService(this.platform.Service.Lightbulb, 'Strip', 'Strip');
-    this.lightService.setCharacteristic(this.platform.Characteristic.Name, 'Strip');
-    this.lightService.getCharacteristic(this.platform.Characteristic.On)
+  private configureAccessory(name: string) {
+    const { Service, Characteristic } = this.platform;
+
+    const infoService =
+      this.accessory.getService(Service.AccessoryInformation) ??
+      this.accessory.addService(Service.AccessoryInformation);
+
+    infoService
+      .setCharacteristic(Characteristic.Manufacturer, PLATFORM_NAME)
+      .setCharacteristic(Characteristic.Model, PLUGIN_AUTHOR)
+      .setCharacteristic(Characteristic.SerialNumber, 'NA')
+      .setCharacteristic(Characteristic.FirmwareRevision, this.wledClient.info.version || 'NA')
+      .setCharacteristic(Characteristic.Name, name || 'WLED Strip');
+  }
+
+  private configureLightService() {
+    const { Service, Characteristic } = this.platform;
+
+    const stripName = 'Strip';
+    const subtype = 'strip-main';
+
+    const lightService =
+        this.accessory.getServiceById(Service.Lightbulb, subtype) ??
+        this.accessory.addService(Service.Lightbulb, stripName, subtype);
+
+    lightService.setPrimaryService(true);
+
+    lightService.setCharacteristic(Characteristic.Name, stripName);
+
+    if (Characteristic.ConfiguredName) {
+      if (!lightService.testCharacteristic(Characteristic.ConfiguredName)) {
+        lightService.addOptionalCharacteristic(Characteristic.ConfiguredName);
+      }
+      lightService.setCharacteristic(Characteristic.ConfiguredName, stripName);
+    }
+
+    lightService.getCharacteristic(this.platform.Characteristic.On)
       .onSet(v => this.setOn(v))
       .onGet(() => this.getOn());
-    this.lightService.getCharacteristic(this.platform.Characteristic.Brightness)
+    lightService.getCharacteristic(this.platform.Characteristic.Brightness)
       .onSet(v => this.setBrightness(v))
       .onGet(() => this.getBrightness());
-    this.lightService.getCharacteristic(this.platform.Characteristic.Hue)
+    lightService.getCharacteristic(this.platform.Characteristic.Hue)
       .onSet(v => this.setHue(v))
       .onGet(() => this.getHue());
-    this.lightService.getCharacteristic(this.platform.Characteristic.Saturation)
+    lightService.getCharacteristic(this.platform.Characteristic.Saturation)
       .onSet(v => this.setSaturation(v))
       .onGet(() => this.getSaturation());
-    this.lightService.setPrimaryService(true);
+
+    return lightService;
   }
 
   async init() {
@@ -264,47 +294,51 @@ export class WledAccessory {
   }
 
   private onPresetsReceived() {
+    const { Service, Characteristic } = this.platform;
+
     const presets = cleanPresets(this.wledClient.presets);
 
-    this.platform.log.debug(`Presets received: ${Object.entries(presets).map(([id, preset]) => `${id}: ${preset.name}`).join(', ')}`);
+    this.platform.log.debug('Presets received');
 
-    const currentServices = new Map<number, Service>();
+    const activePresets = new Map<number, Service>();
     const validSubtypes = new Set<string>();
-    for (const rawkey of Object.keys(presets)) {
+    for (const [rawkey, preset] of Object.entries(presets)) {
       const id = parseInt(rawkey);
-
-      const preset = presets[id];
       const name = preset.name;
+
+      this.platform.log.debug(`Preset: ${id} - ${name}`);
+
       const subtype = `Preset-Switch-${id}-${name}`;
 
-      const inputService = this.accessory.getService(subtype) ||
-        this.accessory.addService(this.platform.Service.Lightbulb, name, subtype);
-      inputService.setCharacteristic(this.platform.Characteristic.Name, name);
-      inputService.getCharacteristic(this.platform.Characteristic.On)
+      const service =
+        this.accessory.getServiceById(Service.Switch, subtype) ??
+        this.accessory.addService(Service.Switch, name, subtype);
+
+      service.setCharacteristic(Characteristic.Name, name);
+      if (Characteristic.ConfiguredName) {
+        if (!service.testCharacteristic(Characteristic.ConfiguredName)) {
+          service.addOptionalCharacteristic(Characteristic.ConfiguredName);
+        }
+        service.setCharacteristic(Characteristic.ConfiguredName, name);
+      }
+
+      service.getCharacteristic(this.platform.Characteristic.On)
         .onGet(() => this.getPresetOn(id))
         .onSet((v) => this.setPresetOn(id, v));
 
-      if (!inputService.testCharacteristic(this.platform.Characteristic.ConfiguredName)) {
-        inputService.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
-      }
-      inputService.setCharacteristic(this.platform.Characteristic.ConfiguredName, name);
-
-      currentServices.set(id, inputService);
+      this.lightService.addLinkedService(service);
+      activePresets.set(id, service);
       validSubtypes.add(subtype);
     }
 
     for (const service of this.lightService.linkedServices) {
-      if (service.subtype === undefined || !validSubtypes.has(service.subtype)) {
-        this.platform.log.debug(`Removing old preset ${service.subtype}`);
-        this.lightService.removeLinkedService(service);
+      const subtype = service.subtype;
+      if (subtype !== undefined && subtype.startsWith('Preset-Switch-') && !validSubtypes.has(subtype)) {
+        this.platform.log.debug(`Removing stale preset service with subtype ${subtype}`);
         this.accessory.removeService(service);
       }
     }
 
-    this.presetServices.clear();
-    for (const [id, service] of currentServices) {
-      this.lightService.addLinkedService(service);
-      this.presetServices.set(id, service);
-    }
+    this.presetServices = activePresets;
   }
 }

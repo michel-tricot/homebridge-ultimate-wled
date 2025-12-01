@@ -83,6 +83,8 @@ describe('WledAccessory', () => {
       getCharacteristic: jest.fn().mockReturnValue(mockCharacteristic),
       setPrimaryService: jest.fn().mockReturnThis(),
       updateCharacteristic: jest.fn().mockReturnThis(),
+      testCharacteristic: jest.fn().mockReturnValue(false),
+      addOptionalCharacteristic: jest.fn(),
       linkedServices: [],
       addLinkedService: jest.fn(),
       removeLinkedService: jest.fn(),
@@ -103,7 +105,10 @@ describe('WledAccessory', () => {
         if (serviceType === 'AccessoryInformation') {
           return mockAccessoryInfoService;
         }
-        if (serviceType === 'Lightbulb') {
+        return undefined;
+      }),
+      getServiceById: jest.fn().mockImplementation((serviceType, subtype) => {
+        if (serviceType === 'Lightbulb' && subtype === 'strip-main') {
           return mockLightService;
         }
         return undefined;
@@ -147,9 +152,10 @@ describe('WledAccessory', () => {
       expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('Model', PLUGIN_AUTHOR);
       expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('SerialNumber', 'NA');
       expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('FirmwareRevision', '0.14.0');
+      expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('Name', 'Test Strip');
 
       // Lightbulb service setup
-      expect(mockAccessory.getService).toHaveBeenCalledWith('Lightbulb');
+      expect(mockAccessory.getServiceById).toHaveBeenCalledWith('Lightbulb', 'strip-main');
       expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Strip');
       expect(mockLightService.setPrimaryService).toHaveBeenCalledWith(true);
 
@@ -175,16 +181,11 @@ describe('WledAccessory', () => {
     });
 
     it('should add lightbulb service if it does not exist', () => {
-      mockAccessory.getService.mockImplementation((serviceType) => {
-        if (serviceType === 'AccessoryInformation') {
-          return mockAccessoryInfoService;
-        }
-        return undefined; // No existing Lightbulb service
-      });
+      mockAccessory.getServiceById.mockReturnValue(undefined);
 
       wledAccessory = new WledAccessory(mockPlatform, mockAccessory);
 
-      expect(mockAccessory.addService).toHaveBeenCalledWith('Lightbulb', 'Strip', 'Strip');
+      expect(mockAccessory.addService).toHaveBeenCalledWith('Lightbulb', 'Strip', 'strip-main');
       expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Strip');
     });
   });
