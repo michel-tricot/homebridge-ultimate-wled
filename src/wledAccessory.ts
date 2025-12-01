@@ -89,9 +89,6 @@ export class WledAccessory {
         reconnect: true,
       },
       immediate: true,
-      init: {
-        presets: true,
-      },
     });
 
     this.configureAccessory(wledConfig.name);
@@ -116,7 +113,7 @@ export class WledAccessory {
   private configureLightService() {
     const { Service, Characteristic } = this.platform;
 
-    const stripName = 'Strip';
+    const stripName = 'Light';
     const subtype = 'strip-main';
 
     const lightService =
@@ -126,7 +123,6 @@ export class WledAccessory {
     lightService.setPrimaryService(true);
 
     lightService.setCharacteristic(Characteristic.Name, stripName);
-
     if (Characteristic.ConfiguredName) {
       if (!lightService.testCharacteristic(Characteristic.ConfiguredName)) {
         lightService.addOptionalCharacteristic(Characteristic.ConfiguredName);
@@ -168,11 +164,7 @@ export class WledAccessory {
     });
 
     await this.wledClient.init().catch(error => this.platform.log.error(error));
-
-    // updated presets event isn't predictable
-    setInterval(() => {
-      this.wledClient.refreshPresets().catch(error => this.platform.log.error('Failed to refresh presets:', error));
-    }, 10000);
+    await this.refreshPresets();
   }
 
   @monitorMethod
@@ -300,6 +292,10 @@ export class WledAccessory {
     for (const [id, presetService] of this.presetServices) {
       presetService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on && this.wledStates.currentPreset === id);
     }
+
+    if (turnedOn) {
+      await this.refreshPresets();
+    }
   }
 
   private onPresetsReceived() {
@@ -317,11 +313,11 @@ export class WledAccessory {
 
       this.platform.log.debug(`Preset: ${id} - ${name}`);
 
-      const subtype = `Preset-Switch-${id}-${name}`;
+      const subtype = `Preset-Lightbulb-${id}-${name}`;
 
       const service =
-        this.accessory.getServiceById(Service.Switch, subtype) ??
-        this.accessory.addService(Service.Switch, name, subtype);
+        this.accessory.getServiceById(Service.Lightbulb, subtype) ??
+        this.accessory.addService(Service.Lightbulb, name, subtype);
 
       service.setCharacteristic(Characteristic.Name, name);
       if (Characteristic.ConfiguredName) {
@@ -342,12 +338,20 @@ export class WledAccessory {
 
     for (const service of this.accessory.services) {
       const subtype = service.subtype;
-      if (subtype !== undefined && subtype.startsWith('Preset-Switch-') && !validSubtypes.has(subtype)) {
+      if (subtype !== undefined && subtype.startsWith('Preset-') && !validSubtypes.has(subtype)) {
         this.platform.log.debug(`Removing stale preset service with subtype ${subtype}`);
         this.accessory.removeService(service);
       }
     }
 
     this.presetServices = activePresets;
+  }
+
+  private async refreshPresets() {
+    try {
+      return await this.wledClient.refreshPresets();
+    } catch (error) {
+      return this.platform.log.error('Failed to refresh presets:', error);
+    }
   }
 }

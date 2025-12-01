@@ -156,7 +156,7 @@ describe('WledAccessory', () => {
 
       // Lightbulb service setup
       expect(mockAccessory.getServiceById).toHaveBeenCalledWith('Lightbulb', 'strip-main');
-      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Strip');
+      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Light');
       expect(mockLightService.setPrimaryService).toHaveBeenCalledWith(true);
 
       // Characteristics configuration
@@ -174,9 +174,6 @@ describe('WledAccessory', () => {
           reconnect: true,
         },
         immediate: true,
-        init: {
-          presets: true,
-        },
       });
     });
 
@@ -185,8 +182,8 @@ describe('WledAccessory', () => {
 
       wledAccessory = new WledAccessory(mockPlatform, mockAccessory);
 
-      expect(mockAccessory.addService).toHaveBeenCalledWith('Lightbulb', 'Strip', 'strip-main');
-      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Strip');
+      expect(mockAccessory.addService).toHaveBeenCalledWith('Lightbulb', 'Light', 'strip-main');
+      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Light');
     });
   });
 
@@ -207,16 +204,10 @@ describe('WledAccessory', () => {
       expect(mockWLEDClientInit).toHaveBeenCalledTimes(1);
     });
 
-    it('should set up interval to refresh presets every 10 seconds', async () => {
+    it('should refresh presets after init', async () => {
       await wledAccessory.init();
 
-      expect(mockWLEDClientRefreshPresets).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(10000);
       expect(mockWLEDClientRefreshPresets).toHaveBeenCalledTimes(1);
-
-      jest.advanceTimersByTime(10000);
-      expect(mockWLEDClientRefreshPresets).toHaveBeenCalledTimes(2);
     });
 
     it('should register open event handler that logs connection opened', async () => {
