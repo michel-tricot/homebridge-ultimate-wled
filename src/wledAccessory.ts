@@ -13,7 +13,7 @@ class WledState {
   hsv = [255, 0, 0];
   colors = [255, 0, 0];
   private brightness = 100;
-  currentPreset: number = 1;
+  currentPreset: number = -1;
 
   set wledBrightness(wledBrightness: number) {
     this.brightness = WledState.toHkBrightness(wledBrightness);
@@ -170,7 +170,9 @@ export class WledAccessory {
     await this.wledClient.init().catch(error => this.platform.log.error(error));
 
     // updated presets event isn't predictable
-    setInterval(() => this.wledClient.refreshPresets(), 10000);
+    setInterval(() => {
+      this.wledClient.refreshPresets().catch(error => this.platform.log.error('Failed to refresh presets:', error));
+    }, 10000);
   }
 
   @monitorMethod
@@ -204,7 +206,6 @@ export class WledAccessory {
 
     if (on) {
       await this.wledClient.turnOn();
-      await this.wledClient.setPreset(this.wledStates.currentPreset);
     } else {
       await this.wledClient.turnOff();
     }
@@ -251,6 +252,7 @@ export class WledAccessory {
   async setPresetOn(id: number, value: CharacteristicValue) {
     if (value as boolean) {
       this.wledStates.currentPreset = id;
+      await this.wledClient.setPreset(this.wledStates.currentPreset);
       await this.setOn(true);
     } else {
       await this.setOn(false);
@@ -262,8 +264,14 @@ export class WledAccessory {
 
     this.platform.log.debug(`State received: ${JSON.stringify(cleanState(state), null, 2)}`);
 
+    let turnedOn = false;
     if (state.on !== undefined && state.on !== this.wledStates.on) {
       this.wledStates.on = state.on;
+
+      if (state.on) {
+        turnedOn = true;
+      }
+
       this.lightService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on);
     }
 
@@ -285,8 +293,9 @@ export class WledAccessory {
       }
     }
 
-    if (state.presetId !== undefined && state.presetId !== -1) {
-      this.wledStates.currentPreset = state.presetId;
+    // When turning on state can receive -1
+    if (turnedOn && state.presetId !== -1) {
+      this.wledStates.currentPreset = state.presetId || -1;
     }
     for (const [id, presetService] of this.presetServices) {
       presetService.updateCharacteristic(this.platform.Characteristic.On, this.wledStates.on && this.wledStates.currentPreset === id);
@@ -331,7 +340,7 @@ export class WledAccessory {
       validSubtypes.add(subtype);
     }
 
-    for (const service of this.lightService.linkedServices) {
+    for (const service of this.accessory.services) {
       const subtype = service.subtype;
       if (subtype !== undefined && subtype.startsWith('Preset-Switch-') && !validSubtypes.has(subtype)) {
         this.platform.log.debug(`Removing stale preset service with subtype ${subtype}`);

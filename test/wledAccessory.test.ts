@@ -344,11 +344,9 @@ describe('WledAccessory', () => {
     });
 
     describe('setOn', () => {
-      it('should turn on WLED client and set preset when value is true', async () => {
-        wledAccessory.wledStates.currentPreset = 3;
+      it('should turn on WLED client when value is true', async () => {
         await wledAccessory.setOn(true);
         expect(mockWLEDClientTurnOn).toHaveBeenCalledTimes(1);
-        expect(mockWLEDClientSetPreset).toHaveBeenCalledWith(3);
         expect(mockWLEDClientTurnOff).not.toHaveBeenCalled();
       });
 
@@ -356,7 +354,6 @@ describe('WledAccessory', () => {
         await wledAccessory.setOn(false);
         expect(mockWLEDClientTurnOff).toHaveBeenCalledTimes(1);
         expect(mockWLEDClientTurnOn).not.toHaveBeenCalled();
-        expect(mockWLEDClientSetPreset).not.toHaveBeenCalled();
       });
     });
 
@@ -411,9 +408,9 @@ describe('WledAccessory', () => {
         // Check internal state was updated
         expect(wledAccessory.wledStates.currentPreset).toBe(7);
 
-        // Check WLED client was called (turnOn and setPreset via setOn)
-        expect(mockWLEDClientTurnOn).toHaveBeenCalledTimes(1);
+        // Check WLED client was called (setPreset then turnOn)
         expect(mockWLEDClientSetPreset).toHaveBeenCalledWith(7);
+        expect(mockWLEDClientTurnOn).toHaveBeenCalledTimes(1);
       });
 
       it('should turn off when value is false', async () => {
