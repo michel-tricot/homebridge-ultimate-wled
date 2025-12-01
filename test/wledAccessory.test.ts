@@ -83,6 +83,8 @@ describe('WledAccessory', () => {
       getCharacteristic: jest.fn().mockReturnValue(mockCharacteristic),
       setPrimaryService: jest.fn().mockReturnThis(),
       updateCharacteristic: jest.fn().mockReturnThis(),
+      testCharacteristic: jest.fn().mockReturnValue(false),
+      addOptionalCharacteristic: jest.fn(),
       linkedServices: [],
       addLinkedService: jest.fn(),
       removeLinkedService: jest.fn(),
@@ -103,7 +105,10 @@ describe('WledAccessory', () => {
         if (serviceType === 'AccessoryInformation') {
           return mockAccessoryInfoService;
         }
-        if (serviceType === 'Lightbulb') {
+        return undefined;
+      }),
+      getServiceById: jest.fn().mockImplementation((serviceType, subtype) => {
+        if (serviceType === 'Lightbulb' && subtype === 'strip-main') {
           return mockLightService;
         }
         return undefined;
@@ -147,10 +152,11 @@ describe('WledAccessory', () => {
       expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('Model', PLUGIN_AUTHOR);
       expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('SerialNumber', 'NA');
       expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('FirmwareRevision', '0.14.0');
+      expect(mockAccessoryInfoService.setCharacteristic).toHaveBeenCalledWith('Name', 'Test Strip');
 
       // Lightbulb service setup
-      expect(mockAccessory.getService).toHaveBeenCalledWith('Lightbulb');
-      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Strip');
+      expect(mockAccessory.getServiceById).toHaveBeenCalledWith('Lightbulb', 'strip-main');
+      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Light');
       expect(mockLightService.setPrimaryService).toHaveBeenCalledWith(true);
 
       // Characteristics configuration
@@ -168,24 +174,16 @@ describe('WledAccessory', () => {
           reconnect: true,
         },
         immediate: true,
-        init: {
-          presets: true,
-        },
       });
     });
 
     it('should add lightbulb service if it does not exist', () => {
-      mockAccessory.getService.mockImplementation((serviceType) => {
-        if (serviceType === 'AccessoryInformation') {
-          return mockAccessoryInfoService;
-        }
-        return undefined; // No existing Lightbulb service
-      });
+      mockAccessory.getServiceById.mockReturnValue(undefined);
 
       wledAccessory = new WledAccessory(mockPlatform, mockAccessory);
 
-      expect(mockAccessory.addService).toHaveBeenCalledWith('Lightbulb', 'Strip', 'Strip');
-      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Strip');
+      expect(mockAccessory.addService).toHaveBeenCalledWith('Lightbulb', 'Light', 'strip-main');
+      expect(mockLightService.setCharacteristic).toHaveBeenCalledWith('Name', 'Light');
     });
   });
 
@@ -206,16 +204,10 @@ describe('WledAccessory', () => {
       expect(mockWLEDClientInit).toHaveBeenCalledTimes(1);
     });
 
-    it('should set up interval to refresh presets every 10 seconds', async () => {
+    it('should refresh presets after init', async () => {
       await wledAccessory.init();
 
-      expect(mockWLEDClientRefreshPresets).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(10000);
       expect(mockWLEDClientRefreshPresets).toHaveBeenCalledTimes(1);
-
-      jest.advanceTimersByTime(10000);
-      expect(mockWLEDClientRefreshPresets).toHaveBeenCalledTimes(2);
     });
 
     it('should register open event handler that logs connection opened', async () => {
@@ -343,11 +335,9 @@ describe('WledAccessory', () => {
     });
 
     describe('setOn', () => {
-      it('should turn on WLED client and set preset when value is true', async () => {
-        wledAccessory.wledStates.currentPreset = 3;
+      it('should turn on WLED client when value is true', async () => {
         await wledAccessory.setOn(true);
         expect(mockWLEDClientTurnOn).toHaveBeenCalledTimes(1);
-        expect(mockWLEDClientSetPreset).toHaveBeenCalledWith(3);
         expect(mockWLEDClientTurnOff).not.toHaveBeenCalled();
       });
 
@@ -355,7 +345,6 @@ describe('WledAccessory', () => {
         await wledAccessory.setOn(false);
         expect(mockWLEDClientTurnOff).toHaveBeenCalledTimes(1);
         expect(mockWLEDClientTurnOn).not.toHaveBeenCalled();
-        expect(mockWLEDClientSetPreset).not.toHaveBeenCalled();
       });
     });
 
@@ -410,9 +399,9 @@ describe('WledAccessory', () => {
         // Check internal state was updated
         expect(wledAccessory.wledStates.currentPreset).toBe(7);
 
-        // Check WLED client was called (turnOn and setPreset via setOn)
-        expect(mockWLEDClientTurnOn).toHaveBeenCalledTimes(1);
+        // Check WLED client was called (setPreset then turnOn)
         expect(mockWLEDClientSetPreset).toHaveBeenCalledWith(7);
+        expect(mockWLEDClientTurnOn).toHaveBeenCalledTimes(1);
       });
 
       it('should turn off when value is false', async () => {
